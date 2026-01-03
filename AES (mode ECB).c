@@ -137,9 +137,7 @@ void decrypt(char *ciphertext, char *plaintext, int key[4][4]) {
     extract_state(state, plaintext);
 }
 
-void remove_padding(char *data, int original_len) {
-    data[original_len] = '\0';
-}
+
 
 int main() {
     int key[4][4] = {
@@ -165,7 +163,14 @@ int main() {
         int pad = (16 - (len % 16)) % 16;
         
         strcpy(bits_padded, bits_input);
-        for(int i = 0; i < pad; i++) {
+        
+        /* Pad with padding count in binary (8 bits) */
+        if(pad == 0) pad = 16;
+        
+        for(int i = 7; i >= 0; i--) {
+            strcat(bits_padded, (pad >> i) & 1 ? "1" : "0");
+        }
+        for(int i = 0; i < pad - 8; i++) {
             strcat(bits_padded, "0");
         }
         
@@ -202,6 +207,16 @@ int main() {
             decrypt(block, block_decrypted, key);
             strcat(decrypted_full, block_decrypted);
         }
+        
+        /* Read padding count from last 8 bits */
+        int padding_bits = 0;
+        for(int i = 0; i < 8; i++) {
+            padding_bits = (padding_bits << 1) | (decrypted_full[strlen(decrypted_full) - 8 + i] - '0');
+        }
+        
+        /* Remove padding */
+        int original_len = strlen(decrypted_full) - padding_bits;
+        decrypted_full[original_len] = '\0';
         
         printf("Decrypted: %s\n", decrypted_full);
         free(decrypted_full);
