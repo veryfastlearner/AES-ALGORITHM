@@ -1,238 +1,490 @@
+/*******************************************************************************
+ * SIMPLE-BLOCK-CIPHER - Chiffrement par bloc simplifié inspiré d'AES
+ * 
+ * Caractéristiques:
+ * - Bloc de 128 bits (16 octets)
+ * - Clé de 128 bits (16 octets)
+ * - 10 tours de transformation
+ * - Opérations simples: XOR, rotation, addition
+ * - Structure matricielle 4x4 comme AES
+ * 
+ * Usage éducatif seulement - PAS pour la sécurité réelle
+ ******************************************************************************/
+
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 
-/* Rotation gauche */
-uint8_t rotl(uint8_t x, int n) {
+/*******************************************************************************
+ * FONCTIONS DE BASE - Opérations mathématiques simples
+ ******************************************************************************/
+
+/**
+ * Rotation à gauche de bits
+ * @param x L'octet à faire tourner
+ * @param n Nombre de positions à tourner (1-7)
+ * @return L'octet tourné
+ */
+uint8_t rotate_left(uint8_t x, int n) {
     return (x << n) | (x >> (8 - n));
 }
 
-uint8_t rotr(uint8_t x, int n) {
+/**
+ * Rotation à droite de bits
+ * @param x L'octet à faire tourner
+ * @param n Nombre de positions à tourner (1-7)
+ * @return L'octet tourné
+ */
+uint8_t rotate_right(uint8_t x, int n) {
     return (x >> n) | (x << (8 - n));
 }
 
-/* SubBytes : XOR + rotation */
-void sub_bytes(uint8_t s[4][4]) {
-    for(int i=0; i<4; i++)
-        for(int j=0; j<4; j++)
-            s[i][j] ^= rotl(s[i][j], 3);
-}
+/*******************************************************************************
+ * TRANSFORMATIONS DU BLOC - Opérations sur l'état 4x4
+ ******************************************************************************/
 
-/* Inverse SubBytes */
-void inv_sub_bytes(uint8_t s[4][4]) {
-    for(int i=0; i<4; i++)
-        for(int j=0; j<4; j++)
-            s[i][j] ^= rotr(s[i][j], 3);
-}
-
-/* ShiftRows : rotation des lignes */
-void shift_rows(uint8_t s[4][4]) {
-    uint8_t t;
-    
-    /* Ligne 1 */
-    t = s[1][0];
-    s[1][0] = s[1][1];
-    s[1][1] = s[1][2];
-    s[1][2] = s[1][3];
-    s[1][3] = t;
-    
-    /* Ligne 2 */
-    t = s[2][0];
-    s[2][0] = s[2][2];
-    s[2][2] = t;
-    t = s[2][1];
-    s[2][1] = s[2][3];
-    s[2][3] = t;
-    
-    /* Ligne 3 */
-    t = s[3][3];
-    s[3][3] = s[3][2];
-    s[3][2] = s[3][1];
-    s[3][1] = s[3][0];
-    s[3][0] = t;
-}
-
-/* Inverse ShiftRows */
-void inv_shift_rows(uint8_t s[4][4]) {
-    uint8_t t;
-    
-    /* Ligne 1 inverse */
-    t = s[1][3];
-    s[1][3] = s[1][2];
-    s[1][2] = s[1][1];
-    s[1][1] = s[1][0];
-    s[1][0] = t;
-    
-    /* Ligne 2 inverse (même que shift_rows) */
-    t = s[2][0];
-    s[2][0] = s[2][2];
-    s[2][2] = t;
-    t = s[2][1];
-    s[2][1] = s[2][3];
-    s[2][3] = t;
-    
-    /* Ligne 3 inverse */
-    t = s[3][0];
-    s[3][0] = s[3][1];
-    s[3][1] = s[3][2];
-    s[3][2] = s[3][3];
-    s[3][3] = t;
-}
-
-/* MixColumns : XOR simple */
-void mix_columns(uint8_t s[4][4]) {
-    for(int c=0; c<4; c++) {
-        uint8_t a=s[0][c], b=s[1][c], c1=s[2][c], d=s[3][c];
-        s[0][c] = b ^ c1 ^ d;
-        s[1][c] = a ^ c1 ^ d;
-        s[2][c] = a ^ b ^ d;
-        s[3][c] = a ^ b ^ c1;
+/**
+ * Substitution des octets (remplace S-box d'AES)
+ * Applique une transformation simple à chaque octet du bloc
+ * @param state Matrice 4x4 représentant l'état courant
+ */
+void substitute_bytes(uint8_t state[4][4]) {
+    int row, col;
+    for(row = 0; row < 4; row++) {
+        for(col = 0; col < 4; col++) {
+            /* Transformation simple: XOR avec rotation */
+            state[row][col] ^= rotate_left(state[row][col], 3);
+        }
     }
 }
 
-/* Inverse MixColumns (identique car réversible) */
-void inv_mix_columns(uint8_t s[4][4]) {
-    mix_columns(s);  /* Même fonction car XOR est auto-inverse */
+/**
+ * Substitution inverse (pour le déchiffrement)
+ * Annule la transformation de substitute_bytes
+ * @param state Matrice 4x4 représentant l'état courant
+ */
+void inverse_substitute_bytes(uint8_t state[4][4]) {
+    int row, col;
+    for(row = 0; row < 4; row++) {
+        for(col = 0; col < 4; col++) {
+            /* Transformation inverse: XOR avec rotation inverse */
+            state[row][col] ^= rotate_right(state[row][col], 3);
+        }
+    }
 }
 
-/* AddRoundKey : XOR */
-void add_key(uint8_t s[4][4], uint8_t k[4][4]) {
-    for(int i=0; i<4; i++)
-        for(int j=0; j<4; j++)
-            s[i][j] ^= k[i][j];
-}
-
-/* Expansion clé simple */
-void expand_key(uint8_t key[4][4], uint8_t rk[11][4][4]) {
-    for(int i=0; i<4; i++)
-        for(int j=0; j<4; j++)
-            rk[0][i][j] = key[i][j];
+/**
+ * Décalage des lignes (similaire à ShiftRows d'AES)
+ * Décale chaque ligne de la matrice d'un nombre différent de positions
+ * @param state Matrice 4x4 représentant l'état courant
+ */
+void shift_rows(uint8_t state[4][4]) {
+    uint8_t temp_value;
     
-    for(int r=1; r<11; r++) {
-        uint8_t t[4] = {rk[r-1][0][3], rk[r-1][1][3], rk[r-1][2][3], rk[r-1][3][3]};
-        uint8_t tmp = t[0];
-        t[0]=t[1]; t[1]=t[2]; t[2]=t[3]; t[3]=tmp;
-        t[0] ^= r;
+    /* Ligne 1: décalage de 1 position vers la gauche */
+    temp_value = state[1][0];
+    state[1][0] = state[1][1];
+    state[1][1] = state[1][2];
+    state[1][2] = state[1][3];
+    state[1][3] = temp_value;
+    
+    /* Ligne 2: décalage de 2 positions (échanges simples) */
+    temp_value = state[2][0];
+    state[2][0] = state[2][2];
+    state[2][2] = temp_value;
+    
+    temp_value = state[2][1];
+    state[2][1] = state[2][3];
+    state[2][3] = temp_value;
+    
+    /* Ligne 3: décalage de 3 positions (1 vers la droite) */
+    temp_value = state[3][3];
+    state[3][3] = state[3][2];
+    state[3][2] = state[3][1];
+    state[3][1] = state[3][0];
+    state[3][0] = temp_value;
+}
+
+/**
+ * Décalage inverse des lignes (pour déchiffrement)
+ * Annule le décalage effectué par shift_rows
+ * @param state Matrice 4x4 représentant l'état courant
+ */
+void inverse_shift_rows(uint8_t state[4][4]) {
+    uint8_t temp_value;
+    
+    /* Ligne 1 inverse: décalage de 1 position vers la droite */
+    temp_value = state[1][3];
+    state[1][3] = state[1][2];
+    state[1][2] = state[1][1];
+    state[1][1] = state[1][0];
+    state[1][0] = temp_value;
+    
+    /* Ligne 2 inverse: même opération que shift_rows (auto-inverse) */
+    temp_value = state[2][0];
+    state[2][0] = state[2][2];
+    state[2][2] = temp_value;
+    
+    temp_value = state[2][1];
+    state[2][1] = state[2][3];
+    state[2][3] = temp_value;
+    
+    /* Ligne 3 inverse: décalage de 3 positions vers la gauche */
+    temp_value = state[3][0];
+    state[3][0] = state[3][1];
+    state[3][1] = state[3][2];
+    state[3][2] = state[3][3];
+    state[3][3] = temp_value;
+}
+
+/**
+ * Mélange des colonnes (similaire à MixColumns d'AES)
+ * Mélange les octets de chaque colonne avec des opérations XOR
+ * @param state Matrice 4x4 représentant l'état courant
+ */
+void mix_columns(uint8_t state[4][4]) {
+    int column;
+    for(column = 0; column < 4; column++) {
+        /* Extraire les 4 octets de la colonne */
+        uint8_t byte1 = state[0][column];
+        uint8_t byte2 = state[1][column];
+        uint8_t byte3 = state[2][column];
+        uint8_t byte4 = state[3][column];
         
-        for(int i=0; i<4; i++) rk[r][i][0] = rk[r-1][i][0] ^ t[i];
-        for(int j=1; j<4; j++)
-            for(int i=0; i<4; i++)
-                rk[r][i][j] = rk[r-1][i][j] ^ rk[r][i][j-1];
+        /* Mélange simple avec XOR */
+        state[0][column] = byte2 ^ byte3 ^ byte4;
+        state[1][column] = byte1 ^ byte3 ^ byte4;
+        state[2][column] = byte1 ^ byte2 ^ byte4;
+        state[3][column] = byte1 ^ byte2 ^ byte3;
     }
 }
 
-/* Chiffrement */
-void encrypt(uint8_t in[16], uint8_t out[16], uint8_t rk[11][4][4]) {
-    uint8_t s[4][4];
-    
-    for(int i=0; i<4; i++)
-        for(int j=0; j<4; j++)
-            s[j][i] = in[i*4+j];
-    
-    add_key(s, rk[0]);
-    
-    for(int r=1; r<10; r++) {
-        sub_bytes(s);
-        shift_rows(s);
-        mix_columns(s);
-        add_key(s, rk[r]);
-    }
-    
-    sub_bytes(s);
-    shift_rows(s);
-    add_key(s, rk[10]);
-    
-    for(int i=0; i<4; i++)
-        for(int j=0; j<4; j++)
-            out[i*4+j] = s[j][i];
-}
-
-/* Déchiffrement */
-void decrypt(uint8_t in[16], uint8_t out[16], uint8_t rk[11][4][4]) {
-    uint8_t s[4][4];
-    
-    for(int i=0; i<4; i++)
-        for(int j=0; j<4; j++)
-            s[j][i] = in[i*4+j];
-    
-    add_key(s, rk[10]);
-    inv_shift_rows(s);
-    inv_sub_bytes(s);
-    
-    for(int r=9; r>=1; r--) {
-        add_key(s, rk[r]);
-        inv_mix_columns(s);
-        inv_shift_rows(s);
-        inv_sub_bytes(s);
-    }
-    
-    add_key(s, rk[0]);
-    
-    for(int i=0; i<4; i++)
-        for(int j=0; j<4; j++)
-            out[i*4+j] = s[j][i];
-}
-
-/* Binaire vers octets */
-void bin_to_bytes(char *bin, uint8_t *bytes, int *len) {
-    *len = strlen(bin)/8;
-    for(int i=0; i<*len; i++) {
-        bytes[i]=0;
-        for(int j=0; j<8; j++)
-            if(bin[i*8+j]=='1')
-                bytes[i] |= (1<<(7-j));
+/**
+ * Ajout de clé de tour (AddRoundKey)
+ * Combine l'état avec la clé de tour par XOR
+ * @param state Matrice 4x4 représentant l'état courant
+ * @param round_key Clé de tour (matrice 4x4)
+ */
+void add_round_key(uint8_t state[4][4], uint8_t round_key[4][4]) {
+    int row, col;
+    for(row = 0; row < 4; row++) {
+        for(col = 0; col < 4; col++) {
+            state[row][col] ^= round_key[row][col];
+        }
     }
 }
 
-/* Main */
+/*******************************************************************************
+ * GESTION DES CLÉS - Génération des clés de tour
+ ******************************************************************************/
+
+/**
+ * Expansion de la clé principale en clés de tour
+ * Génère 11 clés de tour à partir de la clé principale
+ * @param main_key Clé principale (matrice 4x4)
+ * @param round_keys Tableau pour stocker les 11 clés de tour
+ */
+void expand_key(uint8_t main_key[4][4], uint8_t round_keys[11][4][4]) {
+    int round, row, column;
+    
+    /* La clé du tour 0 est la clé principale */
+    for(row = 0; row < 4; row++) {
+        for(column = 0; column < 4; column++) {
+            round_keys[0][row][column] = main_key[row][column];
+        }
+    }
+    
+    /* Générer les clés pour les tours 1 à 10 */
+    for(round = 1; round < 11; round++) {
+        uint8_t temp_column[4];
+        
+        /* Récupérer la dernière colonne de la clé précédente */
+        temp_column[0] = round_keys[round-1][0][3];
+        temp_column[1] = round_keys[round-1][1][3];
+        temp_column[2] = round_keys[round-1][2][3];
+        temp_column[3] = round_keys[round-1][3][3];
+        
+        /* Rotation de la colonne vers le haut */
+        uint8_t first_value = temp_column[0];
+        temp_column[0] = temp_column[1];
+        temp_column[1] = temp_column[2];
+        temp_column[2] = temp_column[3];
+        temp_column[3] = first_value;
+        
+        /* Ajouter la constante de tour */
+        temp_column[0] ^= round;
+        
+        /* Générer la première colonne de la nouvelle clé */
+        for(row = 0; row < 4; row++) {
+            round_keys[round][row][0] = round_keys[round-1][row][0] ^ temp_column[row];
+        }
+        
+        /* Générer les colonnes restantes */
+        for(column = 1; column < 4; column++) {
+            for(row = 0; row < 4; row++) {
+                round_keys[round][row][column] = 
+                    round_keys[round-1][row][column] ^ round_keys[round][row][column-1];
+            }
+        }
+    }
+}
+
+/*******************************************************************************
+ * CHIFFREMENT PRINCIPAL
+ ******************************************************************************/
+
+/**
+ * Chiffre un bloc de 128 bits (16 octets)
+ * @param plaintext Bloc en clair à chiffrer
+ * @param ciphertext Bloc chiffré en sortie
+ * @param round_keys Clés de tour générées par expand_key
+ */
+void encrypt_block(uint8_t plaintext[16], uint8_t ciphertext[16], 
+                   uint8_t round_keys[11][4][4]) {
+    uint8_t current_state[4][4];
+    int row, column, round;
+    
+    /* Convertir le bloc linéaire en matrice 4x4 (colonne par colonne) */
+    for(column = 0; column < 4; column++) {
+        for(row = 0; row < 4; row++) {
+            current_state[row][column] = plaintext[column * 4 + row];
+        }
+    }
+    
+    /* Tour initial - seulement ajout de clé */
+    add_round_key(current_state, round_keys[0]);
+    
+    /* 9 tours principaux */
+    for(round = 1; round < 10; round++) {
+        substitute_bytes(current_state);
+        shift_rows(current_state);
+        mix_columns(current_state);
+        add_round_key(current_state, round_keys[round]);
+    }
+    
+    /* Tour final (sans mix_columns) */
+    substitute_bytes(current_state);
+    shift_rows(current_state);
+    add_round_key(current_state, round_keys[10]);
+    
+    /* Convertir la matrice en bloc linéaire */
+    for(column = 0; column < 4; column++) {
+        for(row = 0; row < 4; row++) {
+            ciphertext[column * 4 + row] = current_state[row][column];
+        }
+    }
+}
+
+/**
+ * Déchiffre un bloc de 128 bits (16 octets)
+ * @param ciphertext Bloc chiffré à déchiffrer
+ * @param plaintext Bloc en clair en sortie
+ * @param round_keys Clés de tour générées par expand_key
+ */
+void decrypt_block(uint8_t ciphertext[16], uint8_t plaintext[16],
+                   uint8_t round_keys[11][4][4]) {
+    uint8_t current_state[4][4];
+    int row, column, round;
+    
+    /* Convertir le bloc linéaire en matrice 4x4 */
+    for(column = 0; column < 4; column++) {
+        for(row = 0; row < 4; row++) {
+            current_state[row][column] = ciphertext[column * 4 + row];
+        }
+    }
+    
+    /* Tour initial inverse */
+    add_round_key(current_state, round_keys[10]);
+    inverse_shift_rows(current_state);
+    inverse_substitute_bytes(current_state);
+    
+    /* 9 tours principaux inverses */
+    for(round = 9; round >= 1; round--) {
+        add_round_key(current_state, round_keys[round]);
+        mix_columns(current_state);  /* Même fonction que pour le chiffrement */
+        inverse_shift_rows(current_state);
+        inverse_substitute_bytes(current_state);
+    }
+    
+    /* Dernier tour */
+    add_round_key(current_state, round_keys[0]);
+    
+    /* Convertir la matrice en bloc linéaire */
+    for(column = 0; column < 4; column++) {
+        for(row = 0; row < 4; row++) {
+            plaintext[column * 4 + row] = current_state[row][column];
+        }
+    }
+}
+
+/*******************************************************************************
+ * UTILITAIRES - Conversion et affichage
+ ******************************************************************************/
+
+/**
+ * Convertit une chaîne binaire en tableau d'octets
+ * @param binary_string Chaîne de caractères '0' et '1'
+ * @param byte_array Tableau pour stocker les octets convertis
+ * @param byte_count Nombre d'octets générés
+ * @return 1 en cas de succès, 0 en cas d'erreur
+ */
+int convert_binary_to_bytes(const char *binary_string, 
+                           uint8_t *byte_array, 
+                           int *byte_count) {
+    int binary_length = strlen(binary_string);
+    int i, j;
+    
+    /* Vérifier que la longueur est multiple de 8 */
+    if(binary_length % 8 != 0) {
+        printf("Erreur: La chaîne binaire doit avoir une longueur multiple de 8 bits.\n");
+        return 0;
+    }
+    
+    *byte_count = binary_length / 8;
+    
+    /* Convertir chaque groupe de 8 bits en un octet */
+    for(i = 0; i < *byte_count; i++) {
+        byte_array[i] = 0;
+        for(j = 0; j < 8; j++) {
+            char current_bit = binary_string[i * 8 + j];
+            if(current_bit == '1') {
+                byte_array[i] |= (1 << (7 - j));
+            }
+            else if(current_bit != '0') {
+                printf("Erreur: Caractère invalide '%c' dans la chaîne binaire.\n", 
+                       current_bit);
+                return 0;
+            }
+        }
+    }
+    
+    return 1;
+}
+
+/**
+ * Affiche un tableau d'octets en format binaire
+ * @param label Étiquette à afficher avant les données
+ * @param data Tableau d'octets à afficher
+ * @param length Nombre d'octets à afficher
+ */
+void display_binary(const char *label, const uint8_t *data, int length) {
+    int i, j;
+    printf("%s (%d bits): ", label, length * 8);
+    for(i = 0; i < length; i++) {
+        for(j = 7; j >= 0; j--) {
+            printf("%d", (data[i] >> j) & 1);
+        }
+        if(i < length - 1) {
+            printf(" ");
+        }
+    }
+    printf("\n");
+}
+
+/* PROGRAMME PRINCIPAL*/
+
 int main() {
-    char bin[256];
-    uint8_t data[256], enc[256], dec[256];
-    int len;
+    char user_input[256];
+    uint8_t plaintext_data[256];
+    uint8_t ciphertext_data[256];
+    uint8_t decrypted_data[256];
+    int data_length;
+    int i;
     
-    uint8_t key[4][4] = {
-        {1,2,3,4}, {5,6,7,8}, {9,10,11,12}, {13,14,15,16}
+    /* Clé de chiffrement fixe (16 octets = 128 bits) */
+    uint8_t encryption_key[4][4] = {
+        {0x01, 0x02, 0x03, 0x04},  /* Première ligne */
+        {0x05, 0x06, 0x07, 0x08},  /* Deuxième ligne */
+        {0x09, 0x0A, 0x0B, 0x0C},  /* Troisième ligne */
+        {0x0D, 0x0E, 0x0F, 0x10}   /* Quatrième ligne */
     };
-    uint8_t rk[11][4][4];
     
-    printf("Entrez bits: ");
-    scanf("%s", bin);
+    /* Clés de tour pour les 10 tours + tour initial */
+    uint8_t all_round_keys[11][4][4];
     
-    bin_to_bytes(bin, data, &len);
+    printf("=== CHIFFREMENT PAR BLOC SIMPLIFIE ===\n\n");
+    printf("Entrez les donnees binaires (ex: 0100100001100101 pour 'He'): ");
     
-    /* Padding simple */
-    int pad = 16 - (len%16);
-    for(int i=len; i<len+pad; i++) data[i]=pad;
-    len += pad;
+    if(scanf("%255s", user_input) != 1) {
+        printf("Erreur de lecture de l'entree.\n");
+        return 1;
+    }
     
-    expand_key(key, rk);
+    /* Conversion de la chaîne binaire en octets */
+    if(!convert_binary_to_bytes(user_input, plaintext_data, &data_length)) {
+        return 1;
+    }
     
-    /* Chiffrer */
-    for(int i=0; i<len; i+=16)
-        encrypt(data+i, enc+i, rk);
+    printf("\n--- Etape 1: Donnees originales ---\n");
+    display_binary("Texte clair", plaintext_data, data_length);
     
-    printf("Chiffre: ");
-    for(int i=0; i<len; i++) {
-        for(int j=7; j>=0; j--)
-            printf("%d", (enc[i]>>j)&1);
-        printf(" ");
+    /* Padding pour que la longueur soit multiple de 16 octets */
+    int padding_needed = 16 - (data_length % 16);
+    if(padding_needed == 0) padding_needed = 16;
+    
+    /* Ajouter le padding (méthode PKCS#7 simple) */
+    for(i = data_length; i < data_length + padding_needed; i++) {
+        plaintext_data[i] = (uint8_t)padding_needed;
+    }
+    int padded_length = data_length + padding_needed;
+    
+    printf("\n--- Etape 2: Preparation ---\n");
+    display_binary("Avec padding", plaintext_data, padded_length);
+    printf("Padding ajoute: %d octets\n", padding_needed);
+    
+    /* Génération des clés de tour */
+    expand_key(encryption_key, all_round_keys);
+    
+    /* Chiffrement de tous les blocs */
+    for(i = 0; i < padded_length; i += 16) {
+        encrypt_block(plaintext_data + i, ciphertext_data + i, all_round_keys);
+    }
+    
+    printf("\n--- Etape 3: Chiffrement ---\n");
+    display_binary("Texte chiffre", ciphertext_data, padded_length);
+    
+    /* Déchiffrement de tous les blocs */
+    for(i = 0; i < padded_length; i += 16) {
+        decrypt_block(ciphertext_data + i, decrypted_data + i, all_round_keys);
+    }
+    
+    printf("\n--- Etape 4: Dechiffrement ---\n");
+    display_binary("Avant suppression padding", decrypted_data, padded_length);
+    
+    /* Suppression du padding */
+    int final_length = padded_length - decrypted_data[padded_length - 1];
+    
+    /* Vérification de la validité du padding */
+    if(final_length < 0 || final_length > padded_length) {
+        printf("Erreur: Padding invalide detecte.\n");
+        return 1;
+    }
+    
+    printf("\n--- Etape 5: Resultat final ---\n");
+    printf("Texte dechiffre (%d bits): ", final_length * 8);
+    for(i = 0; i < final_length; i++) {
+        for(int j = 7; j >= 0; j--) {
+            printf("%d", (decrypted_data[i] >> j) & 1);
+        }
     }
     printf("\n");
     
-    /* Déchiffrer */
-    for(int i=0; i<len; i+=16)
-        decrypt(enc+i, dec+i, rk);
-    
-    /* Enlever padding */
-    len -= dec[len-1];
-    
-    printf("Dechiffre: ");
-    for(int i=0; i<len; i++) {
-        for(int j=7; j>=0; j--)
-            printf("%d", (dec[i]>>j)&1);
+    /* Vérification que le déchiffrement est correct */
+    int decryption_correct = 1;
+    for(i = 0; i < final_length; i++) {
+        if(plaintext_data[i] != decrypted_data[i]) {
+            decryption_correct = 0;
+            break;
+        }
     }
-    printf("\n");
+    
+    if(decryption_correct) {
+        printf("\nSUCCES: Le dechiffrement a produit les donnees originales.\n");
+    }
+    else {
+        printf("\nERREUR: Le dechiffrement a produit un resultat incorrect.\n");
+    }
     
     return 0;
 }
