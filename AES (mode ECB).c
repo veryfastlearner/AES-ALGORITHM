@@ -4,14 +4,26 @@
 
 void load_state(char *bits, int bit_state[4][4]) {
     int idx = 0;
-    for(int i = 0; i < 4; i++) {
-        for(int j = 0; j < 4; j++) {
-            if(bits[idx] == '1') {
-                bit_state[i][j] = 1;
-            } else {
-                bit_state[i][j] = 0;
+    int i, j;
+    
+    /* Initialize all to 0 first */
+    for(i = 0; i < 4; i++) {
+        for(j = 0; j < 4; j++) {
+            bit_state[i][j] = 0;
+        }
+    }
+    
+    /* Load bits from input */
+    for(i = 0; i < 4; i++) {
+        for(j = 0; j < 4; j++) {
+            if(bits[idx] != '\0') {
+                if(bits[idx] == '1') {
+                    bit_state[i][j] = 1;
+                } else {
+                    bit_state[i][j] = 0;
+                }
+                idx += 1;
             }
-            idx = idx + 1;
         }
     }
 }
